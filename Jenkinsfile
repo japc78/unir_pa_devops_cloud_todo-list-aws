@@ -5,7 +5,7 @@ pipeline {
         stage('Get Code') {
             steps {
                 showEnvironmentInfo()
-                git branch: 'develop', credentialsId: 'unir.devops.github.token', url: 'https://github.com/japc78/unir_pa_devops_cloud_todo-list-aws.git'
+                git branch: 'master', credentialsId: 'unir.devops.github.token', url: 'https://github.com/japc78/unir_pa_devops_cloud_todo-list-aws.git'
                 echo 'Save stash'
                 stash includes: '**', name: 'allProject'
                 stash includes: 'src/*.py', name: 'pyFiles'
@@ -13,33 +13,6 @@ pipeline {
             }
             post() {
                 always {
-                    echo "Cleaning up workspace..."
-                    deleteDir()
-                }
-            }
-        }
-
-        stage('Static Test') {
-            steps {
-                unstash 'pyFiles'
-                echo 'Static Test'
-                showEnvironmentInfo()
-                catchError(buildResult: 'FAILURE', stageResult: 'SUCCESS') {
-                    sh '''
-                        flake8 --format=pylint --exit-zero src > flake8.out
-                        bandit --exit-zero -r ./src -f custom -o bandit.out --msg-template '{abspath}:{line}: [{test_id}] {msg}'
-                    '''
-                }
-            }
-
-            post() {
-                always {
-                    recordIssues(
-                        tools: [
-                            flake8(name: 'Flake8', pattern: 'flake8.out'),
-                            pyLint(name: 'Bandit', pattern: 'bandit.out')
-                        ]
-                    )
                     echo "Cleaning up workspace..."
                     deleteDir()
                 }
@@ -54,7 +27,7 @@ pipeline {
                 sh '''
                     sam build
                     sam deploy --config-file samconfig.toml \
-                        --config-env staging \
+                        --config-env production \
                         --no-confirm-changeset \
                         --no-disable-rollback \
                         --no-fail-on-empty-changeset \
@@ -72,7 +45,7 @@ pipeline {
 
         stage('Rest Test') {
             environment {
-                BASE_URL = getStackOutput("todo-list-aws-staging", "BaseUrlApi")
+                BASE_URL = getStackOutput("todo-list-aws-production", "BaseUrlApi")
             }
 
             steps {
@@ -85,41 +58,13 @@ pipeline {
                         echo "Base url es: $BASE_URL"
                         export PYTHONPATH=$WORKSPACE
                         echo "PYTHONPATH is set to: $PYTHONPATH"
-                        pytest --junitxml=junit-rest.xml test/integration/todoApiTest.py
+                        pytest -m read_only --junitxml=junit-rest.xml test/integration/todoApiTest.py
                     '''
 
                     junit('junit-rest.xml')
                 }
             }
             post() {
-                always {
-                    echo "Cleaning up workspace..."
-                    deleteDir()
-                }
-            }
-        }
-
-        stage('Promote') {
-            environment {
-                GIT_CREDENTIALS = credentials('unir.devops.github.token')
-            }
-            steps {
-                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    echo 'Starting Promote'
-                    showEnvironmentInfo()
-
-                    git branch: 'develop', credentialsId: 'unir.devops.github.token', url: 'https://github.com/japc78/unir_pa_devops_cloud_todo-list-aws.git'
-
-                    sh '''
-                        git checkout master
-                        git merge develop
-                    '''
-
-                    sh('git push https://$GIT_CREDENTIALS_USR:$GIT_CREDENTIALS_PSW@github.com/japc78/unir_pa_devops_cloud_todo-list-aws.git master')
-                }
-            }
-
-            post {
                 always {
                     echo "Cleaning up workspace..."
                     deleteDir()
